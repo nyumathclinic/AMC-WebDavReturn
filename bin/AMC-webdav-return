@@ -1,0 +1,10 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+
+use AMC::WebDavReturn qw(main);
+
+
+# Wrapper script for the AMC::WebDavReturn application.
+
+exit main(@ARGV);
