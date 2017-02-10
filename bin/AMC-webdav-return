@@ -1,13 +1,11 @@
 #! /opt/local/bin/perl5.24
 #
-# Return graded report files to a NYU Classes/Sakai site via HTTPS PUT
+# Return graded report files to a WebDAV share via HTTPS PUT
 # MPL 2015-03-20
 #
-#
+# adapted from AMC-return.pl, which sends the annoated files by email.
 #
 # Copyright (C) 2012 Alexis Bienvenue <paamc@passoire.fr>
-#
-# This file is part of Auto-Multiple-Choice
 #
 # Auto-Multiple-Choice is free software: you can redistribute it
 # and/or modify it under the terms of the GNU General Public License
@@ -111,6 +109,8 @@ sub parse_add {
 	 (Email::Address->parse($s)));
 }
 
+# do or do not, depending on if the --dry-run flag is set.
+# Not completely silent, as temporary files are still created.
 sub mydo {
    my @cmd = @_;
    if ($dry_run) {
@@ -120,6 +120,23 @@ sub mydo {
    }
 }
 
+sub dest_url {
+	my ($student) = @_;
+	# FIXME: configure this somehow.
+	# I tried to dump it in options.xml but it got clobbered.
+	# use Config::File maybe?
+	my $fx_url = "https://newclasses.nyu.edu/dav/group-user/0e365405-a59f-485e-b6c4-dda6c527fbdc";
+	$filename = $student->{'surname'} . '__' . $student->{'name'}
+		. $project_options->{'code_examen'} . '.pdf';
+	$filename =~ s/[^A-Za-z0-9\-\._]//g;
+	$filename =~ s/ /_/g;
+	my $url = $fx_url
+		. "/" . $student->{'NetID'}
+		. "/" . $filename;
+	return $url;
+}
+
+
 $project_dir = "." if (!-d $project_dir);
 
 # read options from project directory
@@ -127,9 +144,13 @@ $xml = new XML::Simple;
 $project_options = $xml->XMLin($project_dir . "/options.xml");
 
 
-# Get the "document stem" from the 'exam code' option or the TeX source file
-# TODO: could be a command-line option with this as the default
+# Get the "document stem" from the 'exam code' option.
+# FIXME: C<$project_options->{'code_examen'}> returns something like C<"HASHREF">
+# even when the option is not set. Should give an error
+# Could be overridden by a command line option.
+# Last resort: the name of the tex file?
 # the default source file name is "source.tex" though.
+# or maybe the title from the tex file or PDF?
 # other options: 'nom_examen' is a human-readable form of the exam name, e.g., "Quiz 5"
 $exam_code=$project_options->{'code_examen'} if not $exam_code;
 $texsrc=$project_options->{'texsrc'};
@@ -278,7 +299,8 @@ STUDENT: for my $i (@$r) {
        print "...done.\n";
 
        # Upload
-       $newurl = "https://newclasses.nyu.edu/dav/group-user/" . $site .  "/" . $s->{'NetID'} . "/" . $destfile;
+       # $newurl = "https://newclasses.nyu.edu/dav/group-user/" . $site .  "/" . $s->{'NetID'} . "/" . $destfile;
+	   $newurl = dest_url($s);
        print "Uploading to $newurl...";
        mydo("curl",
                "--netrc",
