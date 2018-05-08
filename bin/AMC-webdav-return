@@ -1,4 +1,4 @@
-#! /opt/local/bin/perl5.24
+#! /usr/bin/env perl -w
 #
 # Return graded report files to a WebDAV share via HTTPS PUT
 # MPL 2015-03-20
@@ -40,9 +40,11 @@ use Email::Sender;
 use Email::Sender::Simple qw(sendmail);
 
 use File::Basename;
+use Cwd 'abs_path';
 use File::Temp qw/tempfile/;
 
 use XML::Simple;
+use Config::General;
 
 my $project_dir='';
 my $data_dir='';
@@ -110,7 +112,6 @@ sub parse_add {
 }
 
 # do or do not, depending on if the --dry-run flag is set.
-# Not completely silent, as temporary files are still created.
 sub mydo {
    my @cmd = @_;
    if ($dry_run) {
@@ -122,13 +123,14 @@ sub mydo {
 
 sub dest_url {
 	my ($student) = @_;
-	# FIXME: configure this somehow.
-	# I tried to dump it in options.xml but it got clobbered.
-	# use Config::File maybe?
-	my $fx_url = "https://newclasses.nyu.edu/dav/group-user/0e365405-a59f-485e-b6c4-dda6c527fbdc";
-	$filename = $student->{'surname'} . '__' . $student->{'name'}
-		. $project_options->{'code_examen'} . '.pdf';
-	$filename =~ s/[^A-Za-z0-9\-\._]//g;
+	$fx_url = $config{'nyuclasses_fx_url'};
+	error("No file exchange URL") unless $fx_url;
+	printf "fx_url=%s\n", $fx_url;
+	$filename = $student->{'surname'}
+		. '__' . $student->{'name'}
+		. '_' . $project_options->{'code_examen'}
+		. '.pdf';
+	$filename =~ s/[^A-Za-z0-9\-\._ ]//g;
 	$filename =~ s/ /_/g;
 	my $url = $fx_url
 		. "/" . $student->{'NetID'}
@@ -138,35 +140,46 @@ sub dest_url {
 
 
 $project_dir = "." if (!-d $project_dir);
+$project_name = basename(abs_path($project_dir));
+print "project_name=$project_name\n";
 
 # read options from project directory
 $xml = new XML::Simple;
 $project_options = $xml->XMLin($project_dir . "/options.xml");
 
+# read script options from a config file
+$script_name = basename(abs_path($0));
+$conf_file_name = "$project_dir/$script_name.conf";
+$conf = Config::General->new((-f $conf_file_name) ? $conf_file_name : {});
+%config = $conf->getall;
+# printf "config: %s", Dumper(\%config);
 
-# Get the "document stem" from the 'exam code' option.
-# FIXME: C<$project_options->{'code_examen'}> returns something like C<"HASHREF">
-# even when the option is not set. Should give an error
-# Could be overridden by a command line option.
-# Last resort: the name of the tex file?
-# the default source file name is "source.tex" though.
-# or maybe the title from the tex file or PDF?
-# other options: 'nom_examen' is a human-readable form of the exam name, e.g., "Quiz 5"
-$exam_code=$project_options->{'code_examen'} if not $exam_code;
-$texsrc=$project_options->{'texsrc'};
-$texsrc =~ s/%PROJET/$project_dir/;
-$docstem = $exam_code ? $exam_code : fileparse($texsrc,'.tex');
-print "docstem=$docstem\n";
+# Fix the C<'code_examen'> project option
+# Priorities:
+#
+# 1. command line option --exam-code=foo
+# 2. saved project setting 'code_examen' or 'Exam code'
+# 3. project directory name, basename only
+#
+# other options to be implemented later
+# - $project_options->{'nom_examen'} is a human-readable
+#   form of the exam name,  e.g., "Quiz 5"
+$exam_code = $project_options->{'code_examen'}
+	unless (ref $project_options->{'code_examen'} eq 'HASH');
+$exam_code = $project_name unless $exam_code;
+error("No exam code") unless $exam_code;
+$project_options->{'code_examen'} = $exam_code;
+# $texsrc=$project_options->{'texsrc'};
+# $texsrc =~ s/%PROJET/$project_dir/;
+# $docstem = $exam_code ? $exam_code : fileparse($texsrc,'.tex');
+print "exam_code=$exam_code\n";
 
 # set an owner password
 # for a new one:
 # $ curl -0 "http://www.random.org/passwords/?num=1&len=8&format=plain&rnd=new"
 $owner_pw="CxYXLXVY";
 
-$program_name=basename($0,".pl");
-
 $data_dir="$project_dir/data" if($project_dir && !$data_dir);
-
 
 # student list
 # If not specified on CL, look in options.xml
@@ -174,7 +187,8 @@ if (!-f $students_list) {
     $students_list=$project_options->{'listeetudiants'};
     $students_list =~ s/%HOME/$ENV{'HOME'}/;
 }
-error("students list not found:$students_list.  (Did you save?)") if(!-f $students_list);
+error("students list not found:$students_list.  (Did you save?)")
+	if(!-f $students_list);
 
 my $students=AMC::NamesFile::new($students_list,
 				 'encodage'=>$list_encoding,
@@ -268,8 +282,8 @@ STUDENT: for my $i (@$r) {
     debug "  FILE=$file";
 
     if(-f $file) {
-
-      $template = $program_name . '-XXXX';
+      $template = $script_name . '-XXXX';
+	  $newurl = dest_url($s);
       my ($tfh1, $tempfile1) = tempfile( $template, SUFFIX => '.pdf', UNLINK=>1);
       # Attach
       print "Creating payload...";
@@ -298,9 +312,6 @@ STUDENT: for my $i (@$r) {
               $tempfile1);
        print "...done.\n";
 
-       # Upload
-       # $newurl = "https://newclasses.nyu.edu/dav/group-user/" . $site .  "/" . $s->{'NetID'} . "/" . $destfile;
-	   $newurl = dest_url($s);
        print "Uploading to $newurl...";
        mydo("curl",
                "--netrc",
@@ -310,7 +321,7 @@ STUDENT: for my $i (@$r) {
        print "...done.\n";
 
       $status = $?;
-      # $m = $!;
+      $m = $!;
       print "$status [$i->{'id'}] $m\n";
       debug "$status [$i->{'id'}] $m";
     } else {
@@ -319,9 +330,9 @@ STUDENT: for my $i (@$r) {
   } else {
     debug "No dest";
   }
-  $avance->progres($delta);
+  # $avance->progres($delta);
 }
 
 $data->end_transaction('Mail');
 
-$avance->fin();
+# $avance->fin();
