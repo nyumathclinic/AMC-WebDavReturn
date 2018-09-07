@@ -186,6 +186,7 @@ $data_dir="$project_dir/data" if($project_dir && !$data_dir);
 if (!-f $students_list) {
     $students_list=$project_options->{'listeetudiants'};
     $students_list =~ s/%HOME/$ENV{'HOME'}/;
+    $students_list =~ s/%PROJET/$project_dir/;
 }
 error("students list not found:$students_list.  (Did you save?)")
 	if(!-f $students_list);
@@ -274,7 +275,7 @@ STUDENT: for my $i (@$r) {
   }
   if($dest) {
     my $file=$pdf_dir.'/'.$i->{'file'};
-    my $destfile = $s->{'surname'} . '__' . $s->{'name'} . '_' . $docstem . '.pdf';
+    my $destfile = $s->{'surname'} . '__' . $s->{'name'} . '_' . $exam_code . '.pdf';
     $destfile =~ s/ /_/g;
     # print "destfile=$destfile\n";
     my $site = $s->{'site'};
