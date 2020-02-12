@@ -121,6 +121,19 @@ sub mydo {
    }
 }
 
+# concatenate pdfs into a single one
+# arg 1 : name of file to be created
+# rest of args : names of files to be concatenated
+sub catpdfs {
+  my $output_filename = shift;
+  my @files = @_;
+  mydo("gs",
+    "-sDEVICE=pdfwrite",
+    "-dNOPAUSE", "-dBATCH", "-dSAFER",
+    "-sOutputFile=$output_filename",
+    ,@files)
+}
+
 sub dest_url {
 	my ($student) = @_;
 	$fx_url = $config{'nyuclasses_fx_url'};
@@ -288,13 +301,7 @@ STUDENT: for my $i (@$r) {
       my ($tfh1, $tempfile1) = tempfile( $template, SUFFIX => '.pdf', UNLINK=>1);
       # Attach
       print "Creating payload...";
-      mydo ("pdftk",
-          $file,
-          @attach_files,
-          "cat",
-          "output",
-          $tempfile1,
-      );
+      catpdfs($tempfile1,$file,@attach_files);
       print "done.\n";
 
 
